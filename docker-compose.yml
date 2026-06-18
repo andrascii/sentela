@@ -1,0 +1,51 @@
+services:
+  app:
+    build: .
+    image: sentela:latest
+    command: npm run start
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://edgepulse:edgepulse_password@postgres:5432/edgepulse
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: sentela:latest
+    command: npm run worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://edgepulse:edgepulse_password@postgres:5432/edgepulse
+      # ALLOW_PRIVATE_TARGETS is read from .env (default: false). Link-local /
+      # cloud-metadata is always blocked.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: edgepulse
+      POSTGRES_USER: edgepulse
+      POSTGRES_PASSWORD: edgepulse_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edgepulse -d edgepulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+# HTTPS (nginx + твой сертификат) — в отдельном файле docker-compose.nginx.yml.
+
+volumes:
+  postgres_data:
