@@ -20,6 +20,7 @@ export function MonitorSettingsEditor({
   id,
   type,
   name: initialName,
+  url: initialUrl,
   expectedStatus,
   failThreshold: initialThreshold,
   intervalSeconds: initialInterval,
@@ -28,6 +29,7 @@ export function MonitorSettingsEditor({
   id: number;
   type: string;
   name: string;
+  url: string;
   expectedStatus: number[];
   failThreshold: number;
   intervalSeconds: number;
@@ -36,6 +38,7 @@ export function MonitorSettingsEditor({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(initialName);
+  const [url, setUrl] = useState(initialUrl);
   const [expectedText, setExpectedText] = useState(expectedStatus.join(", "));
   const [failThreshold, setFailThreshold] = useState(initialThreshold);
   const [intervalSeconds, setIntervalSeconds] = useState(initialInterval);
@@ -43,6 +46,8 @@ export function MonitorSettingsEditor({
   const [error, setError] = useState<string | null>(null);
 
   const isHttpLike = type === "http" || type === "api";
+  // Heartbeat has no target; db monitors store the real target in config.dbUrl.
+  const urlEditable = type !== "heartbeat" && type !== "postgres" && type !== "mysql";
 
   async function save() {
     setBusy(true);
@@ -52,6 +57,7 @@ export function MonitorSettingsEditor({
       failThreshold,
       intervalSeconds,
     };
+    if (urlEditable) body.url = url;
     if (isHttpLike) body.expectedStatus = parseExpectedStatus(expectedText);
     const res = await fetch(`/api/monitors/${id}`, {
       method: "PATCH",
@@ -94,6 +100,21 @@ export function MonitorSettingsEditor({
           onChange={(e) => setName(e.target.value)}
         />
       </div>
+
+      {urlEditable && (
+        <div>
+          <label className="label" htmlFor="m-url">
+            Адрес
+          </label>
+          <input
+            id="m-url"
+            className="input font-mono"
+            maxLength={500}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+      )}
 
       {isHttpLike && (
         <div>

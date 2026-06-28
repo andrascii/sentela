@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -68,38 +69,42 @@ export function MonitorRowMenu({ id }: { id: number }) {
           <circle cx="19" cy="12" r="1.6" />
         </svg>
       </button>
-      {open && pos && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            className="fixed z-50 w-44 rounded-xl border border-ink-600/80 bg-ink-800 p-1.5 shadow-2xl"
-            style={{ top: pos.top, right: pos.right }}
-          >
-            <Link
-              href={`/dashboard/monitors/${id}`}
-              className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-ink-700/60 hover:text-white"
+      {open &&
+        pos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div
+              className="fixed z-50 w-44 rounded-xl border border-ink-600/80 bg-ink-800 p-1.5 shadow-2xl"
+              style={{ top: pos.top, right: pos.right }}
             >
-              Открыть
-            </Link>
-            {confirming ? (
-              <button
-                onClick={del}
-                disabled={busy}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+              <Link
+                href={`/dashboard/monitors/${id}`}
+                className="block rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-ink-700/60 hover:text-white"
               >
-                {busy ? "Удаление…" : "Точно удалить?"}
-              </button>
-            ) : (
-              <button
-                onClick={() => setConfirming(true)}
-                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
-              >
-                Удалить
-              </button>
-            )}
-          </div>
-        </>
-      )}
+                Открыть
+              </Link>
+              {confirming ? (
+                <button
+                  onClick={del}
+                  disabled={busy}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+                >
+                  {busy ? "Удаление…" : "Точно удалить?"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setConfirming(true)}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+                >
+                  Удалить
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
     </>
   );
 }

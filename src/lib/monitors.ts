@@ -60,6 +60,21 @@ export const MONITOR_TYPES = [
 ] as const;
 export const ALLOWED_INTERVALS = [60, 300, 900] as const;
 
+/** Strip user:pass@ from a target URL so credentials are never stored/displayed. */
+export function redactUrlCredentials(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (u.username || u.password) {
+      u.username = "";
+      u.password = "";
+      return u.toString();
+    }
+  } catch {
+    /* not a URL — leave as-is */
+  }
+  return raw;
+}
+
 export async function getActivePlanId(userId: number): Promise<PlanId> {
   const { rows } = await query<{ plan: string; expires_at: string | null }>(
     `SELECT plan, expires_at FROM subscriptions
@@ -198,6 +213,8 @@ export async function createMonitor(
 
 export interface UpdateMonitorFields {
   name?: string;
+  /** Target URL / host (already credential-redacted by the caller). */
+  url?: string;
   groupName?: string | null;
   failThreshold?: number;
   intervalSeconds?: number;
@@ -219,6 +236,7 @@ export async function updateMonitorMeta(
   };
 
   if (fields.name !== undefined) sets.push(`name = ${add(fields.name)}`);
+  if (fields.url !== undefined) sets.push(`url = ${add(fields.url)}`);
   if (fields.groupName !== undefined) {
     const group = fields.groupName && fields.groupName.trim() ? fields.groupName.trim() : null;
     sets.push(`group_name = ${add(group)}`);

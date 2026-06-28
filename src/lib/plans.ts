@@ -1,4 +1,4 @@
-export type PlanId = "starter" | "pro" | "business";
+export type PlanId = "starter" | "pro" | "business" | "unlimited";
 
 export interface Plan {
   id: PlanId;
@@ -58,6 +58,22 @@ export const PLANS: Record<PlanId, Plan> = {
       "Несколько регионов",
       "Командный доступ",
       "История 90 дней",
+    ],
+  },
+  // Скрытый админский план: НЕ в PLAN_LIST, поэтому не показывается в прайсинге/
+  // биллинге и не покупается. Выдаётся вручную в БД (subscriptions.plan).
+  unlimited: {
+    id: "unlimited",
+    name: "Unlimited",
+    priceRub: 0,
+    maxMonitors: 1_000_000,
+    minIntervalSeconds: 60,
+    historyDays: 3650,
+    features: [
+      "Без лимитов мониторов",
+      "Минимальный интервал проверки",
+      "Все типы проверок",
+      "Полная история",
     ],
   },
 };

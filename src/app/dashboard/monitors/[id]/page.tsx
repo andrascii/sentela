@@ -130,6 +130,7 @@ export default async function MonitorDetailPage({
             id={monitor.id}
             type={monitor.type}
             name={monitor.name}
+            url={monitor.url}
             expectedStatus={config.expectedStatus ?? []}
             failThreshold={monitor.fail_threshold}
             intervalSeconds={monitor.interval_seconds}

@@ -5,6 +5,7 @@ import {
   ALLOWED_INTERVALS,
   deleteMonitor,
   getActivePlanId,
+  redactUrlCredentials,
   updateMonitorMeta,
 } from "@/lib/monitors";
 import { getActiveTeamId, getTeamOwnerId } from "@/lib/teams";
@@ -13,6 +14,7 @@ import { parseId } from "@/lib/ids";
 
 const patchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
+  url: z.string().trim().min(1).max(500).optional(),
   groupName: z.string().trim().max(80).nullable().optional(),
   failThreshold: z.coerce.number().int().min(1).max(5).optional(),
   intervalSeconds: z.coerce.number().int().optional(),
@@ -54,7 +56,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
   }
 
-  const ok = await updateMonitorMeta(id, teamId, parsed.data);
+  const fields = { ...parsed.data };
+  if (fields.url !== undefined) fields.url = redactUrlCredentials(fields.url);
+  const ok = await updateMonitorMeta(id, teamId, fields);
   if (!ok) {
     return NextResponse.json({ error: "Не найдено" }, { status: 404 });
   }
