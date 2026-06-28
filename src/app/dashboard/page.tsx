@@ -16,7 +16,7 @@ import {
 } from "@/lib/dashboard";
 import { PLANS } from "@/lib/plans";
 import { StatusBadge } from "@/components/StatusBadge";
-import { AutoRefresh } from "@/components/AutoRefresh";
+import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { MonitorGroupEditor } from "@/components/MonitorGroupEditor";
 import { MonitorRowMenu } from "@/components/dashboard/MonitorRowMenu";
 import {
@@ -114,7 +114,7 @@ export default async function DashboardPage({
               )}
             </p>
           </div>
-          <AutoRefresh intervalMs={10_000} />
+          <RealtimeRefresh />
         </div>
 
         {/* Stat cards */}

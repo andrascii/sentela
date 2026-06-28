@@ -15,7 +15,7 @@ import { parseId } from "@/lib/ids";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LatencyChart } from "@/components/LatencyChart";
 import { DeleteMonitorButton } from "@/components/DeleteMonitorButton";
-import { AutoRefresh } from "@/components/AutoRefresh";
+import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { CopyableUrl } from "@/components/CopyableUrl";
 import { MonitorGroupEditor } from "@/components/MonitorGroupEditor";
 import { MonitorSettingsEditor } from "@/components/MonitorSettingsEditor";
@@ -91,7 +91,7 @@ export default async function MonitorDetailPage({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <AutoRefresh intervalMs={10_000} />
+            <RealtimeRefresh path={`/realtime/monitor/${monitor.id}`} />
             <DeleteMonitorButton id={monitor.id} />
           </div>
         </div>

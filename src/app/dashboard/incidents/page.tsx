@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/session";
 import { getActiveTeamId } from "@/lib/teams";
 import { query } from "@/lib/db";
-import { AutoRefresh } from "@/components/AutoRefresh";
+import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { formatDateTime } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Инциденты" };
@@ -41,7 +41,7 @@ export default async function IncidentsPage() {
             Зафиксированные падения мониторов команды (последние 100).
           </p>
         </div>
-        <AutoRefresh intervalMs={10_000} />
+        <RealtimeRefresh />
       </div>
 
       <div className="card overflow-hidden">

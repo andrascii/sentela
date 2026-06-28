@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { PLAN_LIST } from "@/lib/plans";
 import { getSessionUserId } from "@/lib/session";
+import { yookassaConfigured } from "@/lib/yookassa";
 
 export const metadata: Metadata = {
   title: "Тарифы",
@@ -17,6 +18,7 @@ function planHref(planId: string, loggedIn: boolean): string {
 
 export default async function PricingPage() {
   const loggedIn = (await getSessionUserId()) != null;
+  const billingReady = yookassaConfigured();
   return (
     <div className="container-page py-16">
       <div className="mx-auto max-w-2xl text-center">
@@ -26,6 +28,12 @@ export default async function PricingPage() {
           оплата помесячно.
         </p>
       </div>
+
+      {!billingReady && (
+        <div className="mx-auto mt-8 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-200">
+          Оплата временно недоступна — оформить платный тариф пока нельзя. Попробуйте позже.
+        </div>
+      )}
 
       <div className="mx-auto mt-14 grid max-w-5xl gap-6 lg:grid-cols-3">
         {PLAN_LIST.map((plan) => (
@@ -70,12 +78,18 @@ export default async function PricingPage() {
             </ul>
 
             <div className="mt-8 pt-2">
-              <Link
-                href={planHref(plan.id, loggedIn)}
-                className={plan.highlight ? "btn-primary w-full" : "btn-secondary w-full"}
-              >
-                {plan.id === "starter" ? "Начать бесплатно" : `Выбрать ${plan.name}`}
-              </Link>
+              {plan.id !== "starter" && !billingReady ? (
+                <button disabled className="btn-secondary w-full opacity-60">
+                  Оплата временно недоступна
+                </button>
+              ) : (
+                <Link
+                  href={planHref(plan.id, loggedIn)}
+                  className={plan.highlight ? "btn-primary w-full" : "btn-secondary w-full"}
+                >
+                  {plan.id === "starter" ? "Начать бесплатно" : `Выбрать ${plan.name}`}
+                </Link>
+              )}
             </div>
           </div>
         ))}

@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "worker": "tsx worker/index.ts",
-    "worker:dev": "tsx watch worker/index.ts"
+    "worker:dev": "tsx watch worker/index.ts",
+    "realtime": "tsx ws-server/index.ts",
+    "realtime:dev": "tsx watch ws-server/index.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -20,6 +22,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsx": "^4.19.2",
+    "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -28,6 +31,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.5.12",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",

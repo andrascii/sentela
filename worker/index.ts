@@ -52,6 +52,9 @@ const APP_BASE_URL = (process.env.APP_BASE_URL || "http://localhost:3000").repla
   ""
 );
 
+// Postgres channel the realtime WS service LISTENs on for live dashboard updates.
+const NOTIFY_CHANNEL = "sentela_status";
+
 let running = true;
 let tickCount = 0;
 
@@ -160,7 +163,38 @@ async function processMonitor(monitor: MonitorRow): Promise<void> {
     [monitor.id, confirmed, newFailures, result.sslExpiry ?? null]
   );
 
+  // Push a live update after EVERY check — latency, last-checked time and uptime
+  // change each run, so notifying only on a status transition would leave the
+  // dashboard frozen while a monitor's status is steady.
+  await notifyMonitorUpdate(monitor, result, confirmed, prevStatus);
+
   await maybeAlert(monitor, result, prevStatus, confirmed, threshold);
+}
+
+// Publish a monitor update so the realtime WS service can push it to subscribed
+// clients (it LISTENs on NOTIFY_CHANNEL). Best-effort — a failure here must never
+// break the check loop.
+async function notifyMonitorUpdate(
+  monitor: MonitorRow,
+  result: CheckResult,
+  status: string,
+  prevStatus: string
+): Promise<void> {
+  const payload = JSON.stringify({
+    teamId: monitor.team_id,
+    userId: monitor.user_id,
+    monitorId: monitor.id,
+    name: monitor.name.slice(0, 120),
+    status,
+    prevStatus,
+    changed: status !== prevStatus,
+    latencyMs: result.latencyMs,
+  });
+  try {
+    await query("SELECT pg_notify($1, $2)", [NOTIFY_CHANNEL, payload]);
+  } catch (err) {
+    console.error("[worker] monitor notify failed:", err);
+  }
 }
 
 async function maybeAlert(

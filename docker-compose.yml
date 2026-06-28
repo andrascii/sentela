@@ -29,6 +29,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  realtime:
+    build: .
+    image: sentela:latest
+    command: npm run realtime
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://edgepulse:edgepulse_password@postgres:5432/edgepulse
+      WS_PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:17
     environment:

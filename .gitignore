@@ -29,3 +29,7 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# xray (VPN) — real secrets stay out of git; only *.example.* is committed
+/xray/config.json
+/xray/nginx-locations.conf

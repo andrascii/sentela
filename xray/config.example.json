@@ -1,0 +1,40 @@
+{
+  "//": "ПРИМЕР конфига Xray (VLESS over WebSocket) за nginx. TLS терминирует nginx,",
+  "//2": "поэтому Xray слушает ТОЛЬКО 127.0.0.1 без TLS. На каждого клиента — свой",
+  "//3": "inbound: порт + ws-path + UUID. Пути/UUID НИЖЕ — пример, сгенерируй свои и",
+  "//4": "держи реальный config вне git. Подробности и параметры клиента — в README.md.",
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "client1",
+      "listen": "127.0.0.1",
+      "port": 10001,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{ "id": "ba1a0b02-dbc9-4019-b9d7-085d9d67be54" }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": { "path": "/63625fea1e22094cb679b295" }
+      }
+    },
+    {
+      "tag": "client2",
+      "listen": "127.0.0.1",
+      "port": 10002,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{ "id": "c0133dfa-0c20-4c40-9e81-9c4abf3d2190" }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": { "path": "/39c526865ac964852bd00b1c" }
+      }
+    }
+  ],
+  "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
+}
