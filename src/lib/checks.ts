@@ -499,6 +499,21 @@ async function checkSsl(raw: string, config: MonitorConfig = {}): Promise<CheckR
   } catch (err) {
     return { status: "down", latencyMs: 0, errorMessage: describeError(err) };
   }
+  let result = await sslHandshake(host, port, config);
+  // One retry on a "down" smooths transient TLS timeouts / resets on healthy hosts
+  // (common when many monitors run at once). A genuinely expired cert or an
+  // unreachable host stays "down" on the second attempt too.
+  if (result.status === "down") {
+    result = await sslHandshake(host, port, config);
+  }
+  return result;
+}
+
+function sslHandshake(
+  host: string,
+  port: number,
+  config: MonitorConfig
+): Promise<CheckResult> {
   const warnDays = config.warnDays ?? SSL_WARN_DAYS;
   const start = performance.now();
   return new Promise<CheckResult>((resolve) => {
@@ -607,54 +622,66 @@ async function checkPing(raw: string, config: MonitorConfig = {}): Promise<Check
 async function checkDomain(raw: string, config: MonitorConfig = {}): Promise<CheckResult> {
   const domain = parseTarget(raw, 0).host;
   const warnDays = config.warnDays ?? 30;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const start = performance.now();
-  try {
-    const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
-      signal: controller.signal,
-      headers: { accept: "application/rdap+json" },
-    });
-    const latencyMs = Math.round(performance.now() - start);
-    if (res.status === 404) {
-      return { status: "down", latencyMs, statusCode: 404, errorMessage: `Домен не найден: ${domain}` };
+
+  // Expiry comes from the PUBLIC rdap.org aggregator, which rate-limits (429) and
+  // times out — especially with many domain monitors. A registry-lookup failure is
+  // NOT the domain being down: retry once, then report "up" with a note (never
+  // "down"). Only a real 404 (not registered) or an actual expiry is a true outage.
+  let lastErr = "RDAP недоступен";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
+        signal: controller.signal,
+        headers: { accept: "application/rdap+json" },
+      });
+      const latencyMs = Math.round(performance.now() - start);
+      if (res.status === 404) {
+        return { status: "down", latencyMs, statusCode: 404, errorMessage: `Домен не найден: ${domain}` };
+      }
+      if (!res.ok) {
+        lastErr = `RDAP ${res.status}`;
+        continue; // transient registry error — retry, then fall through to "up"
+      }
+      const data = (await res.json()) as { events?: { eventAction: string; eventDate: string }[] };
+      const exp = (data.events ?? []).find((e) => e.eventAction === "expiration");
+      if (!exp?.eventDate) {
+        return { status: "up", latencyMs, errorMessage: "Дата истечения недоступна" };
+      }
+      const expiry = new Date(exp.eventDate);
+      const daysLeft = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      if (daysLeft <= 0) {
+        return {
+          status: "down",
+          latencyMs,
+          errorMessage: `Домен истёк ${expiry.toISOString().slice(0, 10)}`,
+          sslExpiry: expiry,
+        };
+      }
+      if (daysLeft <= warnDays) {
+        return {
+          status: "degraded",
+          latencyMs,
+          errorMessage: `Домен истекает через ${Math.floor(daysLeft)} дн.`,
+          sslExpiry: expiry,
+        };
+      }
+      return { status: "up", latencyMs, errorMessage: null, sslExpiry: expiry };
+    } catch (err) {
+      lastErr = describeError(err);
+    } finally {
+      clearTimeout(timer);
     }
-    if (!res.ok) {
-      return { status: "down", latencyMs, statusCode: res.status, errorMessage: `RDAP ${res.status}` };
-    }
-    const data = (await res.json()) as { events?: { eventAction: string; eventDate: string }[] };
-    const exp = (data.events ?? []).find((e) => e.eventAction === "expiration");
-    if (!exp?.eventDate) {
-      return { status: "up", latencyMs, errorMessage: "Дата истечения недоступна" };
-    }
-    const expiry = new Date(exp.eventDate);
-    const daysLeft = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    if (daysLeft <= 0) {
-      return {
-        status: "down",
-        latencyMs,
-        errorMessage: `Домен истёк ${expiry.toISOString().slice(0, 10)}`,
-        sslExpiry: expiry,
-      };
-    }
-    if (daysLeft <= warnDays) {
-      return {
-        status: "degraded",
-        latencyMs,
-        errorMessage: `Домен истекает через ${Math.floor(daysLeft)} дн.`,
-        sslExpiry: expiry,
-      };
-    }
-    return { status: "up", latencyMs, errorMessage: null, sslExpiry: expiry };
-  } catch (err) {
-    return {
-      status: "down",
-      latencyMs: Math.round(performance.now() - start),
-      errorMessage: describeError(err),
-    };
-  } finally {
-    clearTimeout(timer);
   }
+  // Both attempts hit a registry-side problem — stay "up" (the domain itself is
+  // fine), just note that the expiry couldn't be verified this round.
+  return {
+    status: "up",
+    latencyMs: Math.round(performance.now() - start),
+    errorMessage: `RDAP временно недоступен — срок не проверен (${lastErr})`,
+  };
 }
 
 async function checkBlacklist(raw: string, config: MonitorConfig = {}): Promise<CheckResult> {

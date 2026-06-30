@@ -41,7 +41,7 @@ const TICK_SECONDS = Math.max(
   5,
   parseInt(process.env.WORKER_TICK_SECONDS || "15", 10) || 15
 );
-const MAX_CONCURRENT = 10;
+const MAX_CONCURRENT = 20; // raised for larger fleets (50+ monitors) to reduce backlog
 const BATCH_LIMIT = 200;
 const RETENTION_DAYS = 90;
 const CLEANUP_EVERY_TICKS = 240; // ~1 hour at a 15s tick
