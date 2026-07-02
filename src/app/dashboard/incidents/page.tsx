@@ -3,7 +3,9 @@ import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/session";
 import { getActiveTeamId } from "@/lib/teams";
 import { query } from "@/lib/db";
+import { listRecentComments } from "@/lib/incidents";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
+import { IncidentTimeline } from "@/components/realtime/IncidentTimeline";
 import { formatDateTime } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Инциденты" };
@@ -23,14 +25,17 @@ export default async function IncidentsPage() {
   const user = (await getCurrentUser())!;
   const teamId = await getActiveTeamId(user.id);
 
-  const { rows: incidents } = await query<IncidentRow>(
-    `SELECT mc.id, m.id AS monitor_id, m.name AS monitor_name, m.type,
-            mc.status_code, mc.error_message, mc.checked_at
-     FROM monitor_checks mc JOIN monitors m ON m.id = mc.monitor_id
-     WHERE m.team_id = $1 AND mc.status = 'down'
-     ORDER BY mc.checked_at DESC LIMIT 100`,
-    [teamId]
-  );
+  const [{ rows: incidents }, comments] = await Promise.all([
+    query<IncidentRow>(
+      `SELECT mc.id, m.id AS monitor_id, m.name AS monitor_name, m.type,
+              mc.status_code, mc.error_message, mc.checked_at
+       FROM monitor_checks mc JOIN monitors m ON m.id = mc.monitor_id
+       WHERE m.team_id = $1 AND mc.status = 'down'
+       ORDER BY mc.checked_at DESC LIMIT 100`,
+      [teamId]
+    ),
+    listRecentComments(teamId),
+  ]);
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -43,6 +48,8 @@ export default async function IncidentsPage() {
         </div>
         <RealtimeRefresh />
       </div>
+
+      <IncidentTimeline initialComments={comments} currentEmail={user.email} />
 
       <div className="card overflow-hidden">
         {incidents.length === 0 ? (

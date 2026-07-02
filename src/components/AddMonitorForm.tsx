@@ -179,6 +179,8 @@ export function AddMonitorForm({
   const [method, setMethod] = useState("GET");
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState("");
+  const [hostHeader, setHostHeader] = useState("");
+  const [insecureTls, setInsecureTls] = useState(false);
   const [assertions, setAssertions] = useState<AssertionRow[]>([]);
   // dns
   const [dnsRecordType, setDnsRecordType] = useState("A");
@@ -242,6 +244,8 @@ export function AddMonitorForm({
           return !!a.path;
         });
       if (cleanAssertions.length > 0) c.assertions = cleanAssertions;
+      if (hostHeader.trim()) c.hostHeader = hostHeader.trim();
+      if (insecureTls) c.insecureTls = true;
     }
     if (type === "dns") {
       c.dnsRecordType = dnsRecordType;
@@ -428,6 +432,20 @@ export function AddMonitorForm({
             <textarea id="headers" className="input font-mono" rows={3} value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
               placeholder={"Authorization: Bearer xxx\nContent-Type: application/json"} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="hostHeader">
+                Host <span className="text-slate-500">(переопределение, необязательно)</span>
+              </label>
+              <input id="hostHeader" className="input font-mono" maxLength={255} value={hostHeader}
+                onChange={(e) => setHostHeader(e.target.value)} placeholder="cdn.example.com" />
+            </div>
+            <label className="flex items-center gap-2 self-end pb-2.5 text-sm text-slate-300">
+              <input type="checkbox" checked={insecureTls} onChange={(e) => setInsecureTls(e.target.checked)}
+                className="h-4 w-4 rounded border-ink-500 bg-ink-900" />
+              Не проверять TLS-сертификат
+            </label>
           </div>
           {bodyAllowed && (
             <div>

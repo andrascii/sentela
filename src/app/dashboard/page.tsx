@@ -17,6 +17,7 @@ import {
 import { PLANS } from "@/lib/plans";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
+import { LiveCheckFeed } from "@/components/realtime/LiveCheckFeed";
 import { MonitorGroupEditor } from "@/components/MonitorGroupEditor";
 import { MonitorRowMenu } from "@/components/dashboard/MonitorRowMenu";
 import {
@@ -222,6 +223,7 @@ export default async function DashboardPage({
       {/* RIGHT RAIL */}
       <aside className="space-y-6">
         <SystemStatusCard overall={overview.overall} lastCheckedAt={overview.lastCheckedAt} />
+        <LiveCheckFeed />
         <UptimeCard uptime24h={overview.uptime24h} trend={overview.uptimeTrend} hourly={overview.hourly} />
         <IncidentsCard incidents={overview.incidents} />
         <QuickActions />

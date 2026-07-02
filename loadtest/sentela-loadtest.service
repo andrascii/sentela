@@ -1,0 +1,40 @@
+# systemd unit for the Sentela load generator.
+#
+# Install on the LOAD-GENERATOR server (not the origin):
+#   sudo useradd -r -s /usr/sbin/nologin loadtest 2>/dev/null || true
+#   sudo cp -r loadtest /opt/sentela-loadtest
+#   sudo chown -R loadtest:loadtest /opt/sentela-loadtest
+#   cd /opt/sentela-loadtest
+#   sudo -u loadtest npm install --omit=dev
+#   sudo -u loadtest cp config.example.env config.env && sudo -u loadtest nano config.env
+#   sudo cp sentela-loadtest.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sentela-loadtest
+#
+# Watch it:        journalctl -u sentela-loadtest -f
+# Stop (drains):   sudo systemctl stop sentela-loadtest
+# Metrics JSONL:   /opt/sentela-loadtest/logs/loadtest-YYYY-MM-DD.jsonl
+
+[Unit]
+Description=Sentela realistic load generator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sentela-loadtest
+EnvironmentFile=/opt/sentela-loadtest/config.env
+ExecStart=/usr/bin/env node load-test.mjs
+Restart=always
+RestartSec=5
+# A load generator opens many sockets — raise the fd limit.
+LimitNOFILE=1048576
+# Run as an unprivileged user (create it once: sudo useradd -r -s /usr/sbin/nologin loadtest)
+User=loadtest
+Group=loadtest
+# Hardening (optional, safe for this workload).
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

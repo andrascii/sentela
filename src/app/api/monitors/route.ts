@@ -28,6 +28,8 @@ const configSchema = z
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]).optional(),
     headers: z.record(z.string().max(1000)).optional(),
     body: z.string().max(10000).optional(),
+    hostHeader: z.string().max(255).optional(),
+    insecureTls: z.boolean().optional(),
     expectedStatus: z.array(z.number().int().min(100).max(599)).max(20).optional(),
     assertions: z.array(assertionSchema).max(20).optional(),
     degradedLatencyMs: z.coerce.number().int().min(1).max(60000).optional(),

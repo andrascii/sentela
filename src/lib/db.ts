@@ -99,6 +99,24 @@ CREATE TABLE IF NOT EXISTS notification_channels (
 );
 CREATE INDEX IF NOT EXISTS idx_channels_user ON notification_channels(user_id);
 
+-- Which probe node ran a check (multi-region live feed). Nullable: a single-region
+-- deployment leaves it NULL; extra workers set REGION and tag their checks.
+ALTER TABLE monitor_checks ADD COLUMN IF NOT EXISTS region TEXT;
+
+-- Collaborative, live incident timeline: team members annotate incidents in real
+-- time (streamed over the realtime WS service; see ws-server/index.ts).
+CREATE TABLE IF NOT EXISTS incident_comments (
+  id           SERIAL PRIMARY KEY,
+  team_id      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  monitor_id   INTEGER REFERENCES monitors(id) ON DELETE SET NULL,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_email TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_incident_comments_team
+  ON incident_comments(team_id, created_at DESC);
+
 -- Billing (YooKassa recurring) — idempotent.
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_method_id TEXT;

@@ -55,6 +55,11 @@ const APP_BASE_URL = (process.env.APP_BASE_URL || "http://localhost:3000").repla
 // Postgres channel the realtime WS service LISTENs on for live dashboard updates.
 const NOTIFY_CHANNEL = "sentela_status";
 
+// This worker's probe location. A single-region deployment leaves it unset (NULL);
+// running extra workers in other regions with distinct REGION values powers the
+// multi-region live check feed.
+const REGION = (process.env.REGION || "").trim() || null;
+
 let running = true;
 let tickCount = 0;
 
@@ -119,14 +124,15 @@ async function processMonitor(monitor: MonitorRow): Promise<void> {
   // Always record the raw result so history reflects what actually happened.
   await query(
     `INSERT INTO monitor_checks
-       (monitor_id, status, latency_ms, status_code, error_message)
-     VALUES ($1, $2, $3, $4, $5)`,
+       (monitor_id, status, latency_ms, status_code, error_message, region)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       monitor.id,
       result.status,
       result.latencyMs,
       result.statusCode ?? null,
       result.errorMessage ?? null,
+      REGION,
     ]
   );
 
@@ -181,14 +187,20 @@ async function notifyMonitorUpdate(
   prevStatus: string
 ): Promise<void> {
   const payload = JSON.stringify({
+    kind: "check",
     teamId: monitor.team_id,
     userId: monitor.user_id,
     monitorId: monitor.id,
     name: monitor.name.slice(0, 120),
+    type: monitor.type,
     status,
     prevStatus,
     changed: status !== prevStatus,
     latencyMs: result.latencyMs,
+    statusCode: result.statusCode ?? null,
+    errorMessage: result.errorMessage ?? null,
+    region: REGION,
+    checkedAt: new Date().toISOString(),
   });
   try {
     await query("SELECT pg_notify($1, $2)", [NOTIFY_CHANNEL, payload]);

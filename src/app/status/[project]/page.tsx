@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Logo } from "@/components/Logo";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { StatusPresence } from "@/components/realtime/StatusPresence";
 import { getStatusPageData } from "@/lib/status";
 import { formatDateTime, formatUptime } from "@/lib/format";
 
@@ -56,8 +57,8 @@ export default async function StatusPage({
             <Logo />
           </div>
           <div className="flex items-center gap-3">
+            <StatusPresence slug={data.slug} />
             <AutoRefresh intervalMs={10_000} />
-            <span className="hidden text-sm text-slate-500 sm:inline">Статус-страница</span>
           </div>
         </div>
       </header>

@@ -24,6 +24,9 @@ services:
       DATABASE_URL: postgres://edgepulse:edgepulse_password@postgres:5432/edgepulse
       # ALLOW_PRIVATE_TARGETS is read from .env (default: false). Link-local /
       # cloud-metadata is always blocked.
+      # REGION tags this worker's checks in the live feed. Leave unset for a
+      # single-region deploy; set distinct values on workers in other regions.
+      # REGION: eu-central
     depends_on:
       postgres:
         condition: service_healthy

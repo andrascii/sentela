@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS monitor_checks (
   latency_ms    INTEGER,
   status_code   INTEGER,
   error_message TEXT,
+  region        TEXT,
   checked_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_checks_monitor
@@ -108,3 +109,16 @@ CREATE TABLE IF NOT EXISTS notification_channels (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_channels_user ON notification_channels(user_id);
+
+-- Collaborative, live incident timeline (streamed over the realtime WS service).
+CREATE TABLE IF NOT EXISTS incident_comments (
+  id           SERIAL PRIMARY KEY,
+  team_id      INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  monitor_id   INTEGER REFERENCES monitors(id) ON DELETE SET NULL,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_email TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_incident_comments_team
+  ON incident_comments(team_id, created_at DESC);

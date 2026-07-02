@@ -104,11 +104,32 @@ else
   ssh_run "gunzip -c /tmp/sentela-img.tar.gz | docker load && rm -f /tmp/sentela-img.tar.gz && docker tag sentela:deploy sentela:latest && cd '$REMOTE_DIR' && docker compose up -d --remove-orphans"
 fi
 
+# ── HTTPS (nginx) ───────────────────────────────────────────────────────────
+# Отдельный слой (network_mode: host). Поднимаем его в СВОЁМ compose-проекте,
+# чтобы --remove-orphans основного стека его не удалял. Стартуем автоматически —
+# но только при наличии сертификатов, иначе nginx ушёл бы в рестарт-цикл.
+NGINX_PROJECT="${NGINX_PROJECT:-sentela-nginx}"
+SSL_DIR="${SSL_DIR:-/etc/monkeyisland/ssl/sentela.org}"
+NGINX_UP=0
+echo "→ Проверяю сертификаты для nginx (${SSL_DIR}) …"
+if ssh_run "test -f '$SSL_DIR/fullchain.pem' && test -f '$SSL_DIR/privatekey.pem'"; then
+  echo "→ Поднимаю nginx (HTTPS) …"
+  ssh_run "cd '$REMOTE_DIR' && docker compose -p '$NGINX_PROJECT' -f docker-compose.nginx.yml up -d --remove-orphans"
+  NGINX_UP=1
+else
+  echo "⚠️  Сертификаты не найдены в ${SSL_DIR} — nginx пропущен (иначе он бы крэшился)."
+  echo "    Положи туда fullchain.pem и privatekey.pem и запусти ./deploy.sh снова."
+fi
+
 echo "→ Статус контейнеров:"
 ssh_run "cd '$REMOTE_DIR' && docker compose ps"
+[ "$NGINX_UP" = "1" ] && ssh_run "cd '$REMOTE_DIR' && docker compose -p '$NGINX_PROJECT' -f docker-compose.nginx.yml ps"
 
 echo ""
-echo "✅ Деплой приложения завершён.  App: http://${SERVER_HOST}:3000"
-echo "   HTTPS (nginx, отдельный слой) — выполни на сервере:"
-echo "     1) положи серт:  /etc/monkeyisland/ssl/sentela.org/{fullchain,privatekey}.pem"
-echo "     2) docker compose -f docker-compose.nginx.yml up -d"
+echo "✅ Деплой завершён.  App: http://${SERVER_HOST}:3000"
+if [ "$NGINX_UP" = "1" ]; then
+  echo "   HTTPS (nginx) поднят автоматически."
+else
+  echo "   HTTPS (nginx) пропущен — нет сертификатов в ${SSL_DIR}."
+  echo "   Положи туда {fullchain,privatekey}.pem и запусти ./deploy.sh снова — nginx поднимется сам."
+fi

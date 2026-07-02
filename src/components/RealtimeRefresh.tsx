@@ -74,7 +74,12 @@ export function RealtimeRefresh({
       socket.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data?.type === "status") scheduleRefresh();
+          // Real, persisted checks (and legacy "status" frames) trigger a
+          // refresh; ephemeral live-mode probes (data.live) do not — the live
+          // panel renders those itself without reloading the page.
+          if ((data?.type === "status" || data?.type === "check") && !data?.live) {
+            scheduleRefresh();
+          }
         } catch {
           /* ignore non-JSON frames */
         }

@@ -13,7 +13,7 @@ import { getActiveTeamId, getTeamOwnerId } from "@/lib/teams";
 import { PLANS } from "@/lib/plans";
 import { parseId } from "@/lib/ids";
 import { StatusBadge } from "@/components/StatusBadge";
-import { LatencyChart } from "@/components/LatencyChart";
+import { MonitorLivePanel } from "@/components/realtime/MonitorLivePanel";
 import { DeleteMonitorButton } from "@/components/DeleteMonitorButton";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { CopyableUrl } from "@/components/CopyableUrl";
@@ -218,10 +218,17 @@ export default async function MonitorDetailPage({
         )}
       </div>
 
-      {/* Latency chart */}
+      {/* Latency (streaming) + live response-time waterfall */}
       <div className="card p-6">
-        <h2 className="mb-4 text-lg font-semibold text-white">Задержка</h2>
-        <LatencyChart points={chronological} />
+        <MonitorLivePanel
+          monitorId={monitor.id}
+          monitorType={monitor.type}
+          initialPoints={chronological.map((c) => ({
+            latency_ms: c.latency_ms,
+            status: c.status,
+            checked_at: c.checked_at,
+          }))}
+        />
       </div>
 
       {/* Recent errors */}

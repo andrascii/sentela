@@ -1,5 +1,7 @@
 import net from "node:net";
 import tls from "node:tls";
+import http from "node:http";
+import https from "node:https";
 import dns from "node:dns/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -27,6 +29,12 @@ export interface MonitorConfig {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  /** Override the Host header (CDN routing / fronting). Sent verbatim; SNI still
+   *  follows the connected URL host. Forces the Node http(s) path. */
+  hostHeader?: string;
+  /** Skip TLS certificate verification (curl -k) — for hosts whose cert doesn't
+   *  match the connected name (e.g. CDN fronting). Forces the Node http(s) path. */
+  insecureTls?: boolean;
   /** Acceptable status codes. When set, only these count as "up". */
   expectedStatus?: number[];
   assertions?: Assertion[];
@@ -253,6 +261,12 @@ async function checkHttpLike(
   rawUrl: string,
   config: MonitorConfig = {}
 ): Promise<CheckResult> {
+  // A Host-header override or insecure TLS can't be expressed through fetch (undici
+  // forbids the Host header and has no per-request cert-verify toggle) — route those
+  // through Node's http(s) module, which gives full header + TLS control.
+  if (config.hostHeader || config.insecureTls) {
+    return checkViaNode(rawUrl, config);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const start = performance.now();
@@ -377,6 +391,117 @@ async function checkHttpLike(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// HTTP/API request via Node's http(s) module — used only when a Host-header
+// override or insecure TLS is configured (things fetch can't do). No auto-redirect
+// (callers that need a 3xx assert it via expectedStatus anyway).
+async function checkViaNode(rawUrl: string, config: MonitorConfig): Promise<CheckResult> {
+  const method = (config.method || "GET").toUpperCase();
+  const expected = config.expectedStatus;
+  const degradedMs = config.degradedLatencyMs ?? DEGRADED_LATENCY_MS;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(httpUrl(rawUrl));
+  } catch {
+    return { status: "down", latencyMs: 0, errorMessage: `Некорректный URL: ${rawUrl}` };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { status: "down", latencyMs: 0, errorMessage: `Неподдерживаемая схема: ${parsed.protocol}` };
+  }
+  try {
+    await assertSafeHost(parsed.hostname);
+  } catch (err) {
+    return { status: "down", latencyMs: 0, errorMessage: describeError(err) };
+  }
+
+  const headers: Record<string, string> = {
+    "user-agent": "Sentela-Monitor/1.0 (+https://sentela.example)",
+    ...(config.headers ?? {}),
+  };
+  if (config.hostHeader) headers["host"] = config.hostHeader;
+
+  const start = performance.now();
+  // Typed as https options (a superset) so the http branch accepts it too — the
+  // TLS fields are simply ignored over plain http.
+  const options: https.RequestOptions = {
+    method,
+    headers,
+    servername: parsed.hostname, // SNI tracks the connected host, not the Host header
+    rejectUnauthorized: !config.insecureTls,
+    timeout: TIMEOUT_MS,
+  };
+
+  return new Promise<CheckResult>((resolve) => {
+    let settled = false;
+    const done = (r: CheckResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    const onResponse = (res: http.IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        let len = 0;
+        res.on("data", (c: Buffer) => {
+          len += c.length;
+          if (len <= MAX_BODY_BYTES) chunks.push(c);
+        });
+        res.on("end", () => {
+          const latencyMs = Math.round(performance.now() - start);
+          const statusCode = res.statusCode ?? 0;
+          const statusOk =
+            expected && expected.length > 0 ? expected.includes(statusCode) : statusCode < 400;
+          if (!statusOk) {
+            const note = expected && expected.length > 0 ? `, ожидались: ${expected.join(", ")}` : "";
+            done({ status: "down", latencyMs, statusCode, errorMessage: `Код ${statusCode}${note}` });
+            return;
+          }
+          const assertions = config.assertions ?? [];
+          if (assertions.length > 0) {
+            const headerObj: Record<string, string> = {};
+            for (const [k, v] of Object.entries(res.headers)) {
+              headerObj[k.toLowerCase()] = Array.isArray(v) ? v.join(", ") : String(v ?? "");
+            }
+            const bodyText = Buffer.concat(chunks).toString("utf8");
+            const failure = evaluateAssertions(assertions, { statusCode, headers: headerObj, bodyText });
+            if (failure) {
+              done({ status: "down", latencyMs, statusCode, errorMessage: failure });
+              return;
+            }
+          }
+          done({
+            status: latencyMs > degradedMs ? "degraded" : "up",
+            latencyMs,
+            statusCode,
+            errorMessage: null,
+          });
+        });
+    };
+    const req =
+      parsed.protocol === "https:"
+        ? https.request(parsed, options, onResponse)
+        : http.request(parsed, options, onResponse);
+    req.on("timeout", () => {
+      req.destroy();
+      done({
+        status: "down",
+        latencyMs: Math.round(performance.now() - start),
+        statusCode: null,
+        errorMessage: "Таймаут запроса",
+      });
+    });
+    req.on("error", (err) => {
+      done({
+        status: "down",
+        latencyMs: Math.round(performance.now() - start),
+        statusCode: null,
+        errorMessage: describeError(err),
+      });
+    });
+    if (config.body && BODY_METHODS.has(method)) req.write(config.body);
+    req.end();
+  });
 }
 
 async function checkTcp(raw: string, config: MonitorConfig = {}): Promise<CheckResult> {
@@ -619,69 +744,230 @@ async function checkPing(raw: string, config: MonitorConfig = {}): Promise<Check
   }
 }
 
+// ── Domain registration expiry ──────────────────────────────────────────────
+// The expiry date lives only at the registry, so SOME external query is
+// unavoidable — but we go DIRECT, no rdap.org middleman: RDAP via the IANA
+// bootstrap for TLDs that support it, else WHOIS on port 43 (covers ccTLDs like
+// .ru, which have no RDAP). Results are cached so registry servers are queried
+// rarely; per-check liveness comes from cheap DNS delegation instead.
+const EXPIRY_TTL_OK_MS = 12 * 60 * 60 * 1000; // re-check a known expiry every 12h
+const EXPIRY_TTL_FAIL_MS = 60 * 60 * 1000; // retry an unknown expiry every 1h
+const RDAP_BOOTSTRAP_TTL_MS = 24 * 60 * 60 * 1000;
+
+const domainExpiryCache = new Map<string, { expiry: Date | null; at: number }>();
+const whoisServerCache = new Map<string, string | null>();
+let rdapBootstrap: { at: number; map: Map<string, string> } | null = null;
+
+/** Reject `p` if it doesn't settle within `ms` (used to bound DNS lookups). */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    t = setTimeout(() => reject(new Error(label)), ms);
+  });
+  // Swallow a late rejection if the timeout wins the race, so `p` settling after
+  // doesn't surface as an unhandled rejection.
+  p.catch(() => {});
+  return Promise.race([p, timeout]).finally(() => {
+    if (t) clearTimeout(t);
+  });
+}
+
+function tldOf(domain: string): string {
+  const parts = domain.toLowerCase().split(".").filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+}
+
 async function checkDomain(raw: string, config: MonitorConfig = {}): Promise<CheckResult> {
   const domain = parseTarget(raw, 0).host;
   const warnDays = config.warnDays ?? 30;
   const start = performance.now();
 
-  // Expiry comes from the PUBLIC rdap.org aggregator, which rate-limits (429) and
-  // times out — especially with many domain monitors. A registry-lookup failure is
-  // NOT the domain being down: retry once, then report "up" with a note (never
-  // "down"). Only a real 404 (not registered) or an actual expiry is a true outage.
-  let lastErr = "RDAP недоступен";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Liveness: is the domain still delegated? DNS is cheap and not rate-limited, so
+  // it's the per-check signal — NXDOMAIN means gone, a transient error is ignored.
+  try {
+    const ns = await withTimeout(dns.resolveNs(domain), TIMEOUT_MS, "DNS NS timed out");
+    if (ns.length === 0) {
+      return {
+        status: "down",
+        latencyMs: Math.round(performance.now() - start),
+        errorMessage: `Домен не делегирован: ${domain}`,
+      };
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const latencyMs = Math.round(performance.now() - start);
+    if (code === "ENOTFOUND" || code === "ENODATA") {
+      return { status: "down", latencyMs, errorMessage: `Домен не делегирован: ${domain}` };
+    }
+    return { status: "up", latencyMs, errorMessage: `DNS временно недоступен (${describeError(err)})` };
+  }
+
+  // Live — enrich with the registration expiry (cached; fetched rarely).
+  const expiry = await getDomainExpiry(domain).catch(() => null);
+  const latencyMs = Math.round(performance.now() - start);
+  if (!expiry) {
+    return { status: "up", latencyMs, errorMessage: "Срок истечения не определён" };
+  }
+  const daysLeft = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  if (daysLeft <= 0) {
+    return {
+      status: "down",
+      latencyMs,
+      errorMessage: `Домен истёк ${expiry.toISOString().slice(0, 10)}`,
+      sslExpiry: expiry,
+    };
+  }
+  if (daysLeft <= warnDays) {
+    return {
+      status: "degraded",
+      latencyMs,
+      errorMessage: `Домен истекает через ${Math.floor(daysLeft)} дн.`,
+      sslExpiry: expiry,
+    };
+  }
+  return { status: "up", latencyMs, errorMessage: null, sslExpiry: expiry };
+}
+
+/** Registration expiry from the registry, cached. Direct RDAP first, then WHOIS. */
+async function getDomainExpiry(domain: string): Promise<Date | null> {
+  const key = domain.toLowerCase();
+  const cached = domainExpiryCache.get(key);
+  if (cached) {
+    const ttl = cached.expiry ? EXPIRY_TTL_OK_MS : EXPIRY_TTL_FAIL_MS;
+    if (Date.now() - cached.at < ttl) return cached.expiry;
+  }
+  let expiry: Date | null = null;
+  try {
+    expiry = await rdapDirectExpiry(key);
+  } catch {
+    /* fall through to WHOIS */
+  }
+  if (!expiry) {
+    try {
+      expiry = await whoisExpiry(key);
+    } catch {
+      /* leave null — DNS already confirmed the domain is live */
+    }
+  }
+  domainExpiryCache.set(key, { expiry, at: Date.now() });
+  return expiry;
+}
+
+/** Authoritative RDAP base URL for a TLD via the cached IANA bootstrap registry. */
+async function rdapBaseForTld(tld: string): Promise<string | null> {
+  if (!rdapBootstrap || Date.now() - rdapBootstrap.at > RDAP_BOOTSTRAP_TTL_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
-        signal: controller.signal,
-        headers: { accept: "application/rdap+json" },
-      });
-      const latencyMs = Math.round(performance.now() - start);
-      if (res.status === 404) {
-        return { status: "down", latencyMs, statusCode: 404, errorMessage: `Домен не найден: ${domain}` };
+      const res = await fetch("https://data.iana.org/rdap/dns.json", { signal: controller.signal });
+      if (!res.ok) throw new Error(`bootstrap ${res.status}`);
+      const data = (await res.json()) as { services?: [string[], string[]][] };
+      const map = new Map<string, string>();
+      for (const [tlds, urls] of data.services ?? []) {
+        const base = urls.find((u) => u.startsWith("https://")) ?? urls[0];
+        if (!base) continue;
+        for (const t of tlds) map.set(t.toLowerCase(), base.replace(/\/+$/, ""));
       }
-      if (!res.ok) {
-        lastErr = `RDAP ${res.status}`;
-        continue; // transient registry error — retry, then fall through to "up"
-      }
-      const data = (await res.json()) as { events?: { eventAction: string; eventDate: string }[] };
-      const exp = (data.events ?? []).find((e) => e.eventAction === "expiration");
-      if (!exp?.eventDate) {
-        return { status: "up", latencyMs, errorMessage: "Дата истечения недоступна" };
-      }
-      const expiry = new Date(exp.eventDate);
-      const daysLeft = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-      if (daysLeft <= 0) {
-        return {
-          status: "down",
-          latencyMs,
-          errorMessage: `Домен истёк ${expiry.toISOString().slice(0, 10)}`,
-          sslExpiry: expiry,
-        };
-      }
-      if (daysLeft <= warnDays) {
-        return {
-          status: "degraded",
-          latencyMs,
-          errorMessage: `Домен истекает через ${Math.floor(daysLeft)} дн.`,
-          sslExpiry: expiry,
-        };
-      }
-      return { status: "up", latencyMs, errorMessage: null, sslExpiry: expiry };
-    } catch (err) {
-      lastErr = describeError(err);
+      rdapBootstrap = { at: Date.now(), map };
     } finally {
       clearTimeout(timer);
     }
   }
-  // Both attempts hit a registry-side problem — stay "up" (the domain itself is
-  // fine), just note that the expiry couldn't be verified this round.
-  return {
-    status: "up",
-    latencyMs: Math.round(performance.now() - start),
-    errorMessage: `RDAP временно недоступен — срок не проверен (${lastErr})`,
-  };
+  return rdapBootstrap?.map.get(tld) ?? null;
+}
+
+async function rdapDirectExpiry(domain: string): Promise<Date | null> {
+  const base = await rdapBaseForTld(tldOf(domain));
+  if (!base) return null; // TLD has no RDAP (e.g. .ru) — WHOIS will handle it
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}/domain/${encodeURIComponent(domain)}`, {
+      signal: controller.signal,
+      headers: { accept: "application/rdap+json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { events?: { eventAction: string; eventDate: string }[] };
+    const exp = (data.events ?? []).find((e) => e.eventAction === "expiration");
+    if (!exp?.eventDate) return null;
+    const d = new Date(exp.eventDate);
+    return isNaN(d.getTime()) ? null : d;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// WHOIS field names that carry the expiry date — formats differ per registry.
+const WHOIS_EXPIRY_FIELDS = new Set([
+  "paid-till", // .ru / .su / .рф
+  "registry expiry date",
+  "registrar registration expiration date",
+  "expiry date",
+  "expiration date",
+  "expiration time",
+  "expire",
+  "expires",
+  "renewal date",
+]);
+
+function parseWhoisExpiry(text: string): Date | null {
+  for (const line of text.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim().toLowerCase();
+    if (!WHOIS_EXPIRY_FIELDS.has(key)) continue;
+    const d = new Date(line.slice(idx + 1).trim());
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+/** Registry WHOIS server for a TLD (discovered via whois.iana.org), cached. */
+async function whoisServerForTld(tld: string): Promise<string | null> {
+  if (whoisServerCache.has(tld)) return whoisServerCache.get(tld) ?? null;
+  let server: string | null = null;
+  try {
+    const text = await whoisQuery("whois.iana.org", tld);
+    const m = text.match(/^whois:\s*(\S+)/im);
+    server = m ? m[1] : null;
+  } catch {
+    server = null;
+  }
+  whoisServerCache.set(tld, server);
+  return server;
+}
+
+async function whoisExpiry(domain: string): Promise<Date | null> {
+  const server = await whoisServerForTld(tldOf(domain));
+  if (!server) return null;
+  return parseWhoisExpiry(await whoisQuery(server, domain));
+}
+
+/** Minimal WHOIS (RFC 3912): connect to <server>:43, send the query, read reply. */
+async function whoisQuery(server: string, query: string): Promise<string> {
+  await assertSafeHost(server); // server comes from IANA, but keep the SSRF guard
+  return new Promise<string>((resolve, reject) => {
+    const socket = new net.Socket();
+    let buf = "";
+    let settled = false;
+    const done = (err: Error | null) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (err) reject(err);
+      else resolve(buf);
+    };
+    socket.setTimeout(TIMEOUT_MS);
+    socket.once("connect", () => socket.write(`${query}\r\n`));
+    socket.on("data", (d) => {
+      buf += d.toString();
+      if (buf.length > MAX_BODY_BYTES) done(null); // cap, use what we have
+    });
+    socket.once("end", () => done(null));
+    socket.once("timeout", () => done(new Error("WHOIS timed out")));
+    socket.once("error", (err) => done(err));
+    socket.connect(43, server);
+  });
 }
 
 async function checkBlacklist(raw: string, config: MonitorConfig = {}): Promise<CheckResult> {
@@ -963,6 +1249,164 @@ function describeError(err: unknown): string {
     return code ? `${code}: ${err.message}` : err.message;
   }
   return String(err);
+}
+
+// ── Response-time waterfall ─────────────────────────────────────────────────
+// Per-phase timing breakdown of a single HTTP(S) request, captured from the raw
+// socket lifecycle (fetch/undici doesn't expose these). Used by the live monitor
+// panel to draw a real-time waterfall — it does NOT run in the normal worker loop
+// and its result is never persisted (a live-only, ephemeral measurement).
+export interface HttpTiming {
+  /** DNS resolution. */
+  dnsMs: number;
+  /** TCP connect (SYN→ACK). */
+  connectMs: number;
+  /** TLS handshake (0 for plain http). */
+  tlsMs: number;
+  /** Time to first byte (request sent → response headers). */
+  ttfbMs: number;
+  /** Body download (first byte → last byte). */
+  downloadMs: number;
+  /** Wall-clock total. */
+  totalMs: number;
+}
+
+export interface TimedResult {
+  timing: HttpTiming;
+  statusCode: number | null;
+  errorMessage: string | null;
+}
+
+const ZERO_TIMING: HttpTiming = {
+  dnsMs: 0,
+  connectMs: 0,
+  tlsMs: 0,
+  ttfbMs: 0,
+  downloadMs: 0,
+  totalMs: 0,
+};
+
+/** Measure the phase-by-phase timing of one HTTP(S) request. Never throws. */
+export async function measureHttpTiming(
+  rawUrl: string,
+  config: MonitorConfig = {}
+): Promise<TimedResult> {
+  let parsed: URL;
+  try {
+    parsed = new URL(httpUrl(rawUrl));
+  } catch {
+    return { timing: ZERO_TIMING, statusCode: null, errorMessage: `Некорректный URL: ${rawUrl}` };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      timing: ZERO_TIMING,
+      statusCode: null,
+      errorMessage: `Неподдерживаемая схема: ${parsed.protocol}`,
+    };
+  }
+  try {
+    await assertSafeHost(parsed.hostname);
+  } catch (err) {
+    return { timing: ZERO_TIMING, statusCode: null, errorMessage: describeError(err) };
+  }
+
+  const isHttps = parsed.protocol === "https:";
+  const method = (config.method || "GET").toUpperCase();
+  const headers: Record<string, string> = {
+    "user-agent": "Sentela-Monitor/1.0 (+https://sentela.example)",
+    ...(config.headers ?? {}),
+  };
+  if (config.hostHeader) headers["host"] = config.hostHeader;
+
+  const options: https.RequestOptions = {
+    method,
+    headers,
+    servername: parsed.hostname,
+    rejectUnauthorized: !config.insecureTls,
+    timeout: TIMEOUT_MS,
+    // Force a fresh, non-pooled socket every call: keep-alive reuse would skip
+    // the lookup/connect/secureConnect events and collapse DNS/TCP/TLS to 0 on
+    // repeated probes. A cold connection is also the correct thing to measure.
+    agent: false,
+  };
+
+  const clamp = (n: number): number => Math.max(0, Math.round(n));
+
+  return new Promise<TimedResult>((resolve) => {
+    const t0 = performance.now();
+    let tDns = 0;
+    let tConnect = 0;
+    let tTls = 0;
+    let tTtfb = 0;
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (r: TimedResult) => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
+      resolve(r);
+    };
+    const fail = (msg: string) =>
+      finish({
+        timing: { ...ZERO_TIMING, totalMs: clamp(performance.now() - t0) },
+        statusCode: null,
+        errorMessage: msg,
+      });
+
+    const requestFn = isHttps ? https.request : http.request;
+    const req = requestFn(parsed, options, (res) => {
+      tTtfb = performance.now();
+      res.on("data", () => {
+        /* drain so 'end' fires and the socket closes */
+      });
+      res.once("end", () => {
+        const end = performance.now();
+        // Connect phase ends at TLS start (https) or at the connect event (http).
+        const connectEnd = isHttps && tTls ? tTls : tConnect;
+        const timing: HttpTiming = {
+          dnsMs: clamp((tDns || t0) - t0),
+          connectMs: clamp(tConnect - (tDns || t0)),
+          tlsMs: isHttps && tTls ? clamp(tTls - tConnect) : 0,
+          ttfbMs: clamp(tTtfb - (connectEnd || tConnect || t0)),
+          downloadMs: clamp(end - tTtfb),
+          totalMs: clamp(end - t0),
+        };
+        finish({ timing, statusCode: res.statusCode ?? null, errorMessage: null });
+      });
+    });
+
+    // Absolute deadline: the `timeout` option only fires on socket IDLE, so a
+    // response that trickles bytes forever would never time out on its own.
+    deadline = setTimeout(() => {
+      try {
+        req.destroy();
+      } catch {
+        /* ignore */
+      }
+      fail("Таймаут запроса");
+    }, TIMEOUT_MS);
+
+    req.on("socket", (socket) => {
+      socket.once("lookup", () => {
+        if (!tDns) tDns = performance.now();
+      });
+      socket.once("connect", () => {
+        if (!tConnect) tConnect = performance.now();
+      });
+      socket.once("secureConnect", () => {
+        if (!tTls) tTls = performance.now();
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      fail("Таймаут запроса");
+    });
+    req.on("error", (err) => fail(describeError(err)));
+
+    if (config.body && BODY_METHODS.has(method)) req.write(config.body);
+    req.end();
+  });
 }
 
 export async function runCheck(monitor: {
