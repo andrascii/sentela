@@ -101,41 +101,85 @@ export function TelegramConnect({ initial }: { initial: TelegramStatus }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div>
       {status.connected ? (
-        <>
-          <p className="text-sm text-slate-200">
-            Подключён чат{" "}
-            <span className="font-mono text-brand-300">{status.target}</span>
-          </p>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-brand-500"
-              checked={status.notify}
-              onChange={(e) => toggleNotify(e.target.checked)}
-            />
-            Получать уведомления в Telegram
-          </label>
-          <button onClick={disconnect} disabled={busy} className="btn-ghost text-xs">
-            Отвязать
-          </button>
-        </>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-200">Уведомления</p>
+              <p className="truncate text-xs text-slate-500">
+                чат <span className="font-mono">{status.target}</span>
+              </p>
+            </div>
+            <Switch checked={status.notify} onChange={toggleNotify} />
+          </div>
+          <div className="flex items-center justify-between border-t border-white/5 pt-2.5">
+            <span className="text-xs text-slate-500">
+              {status.notify ? "Алерты приходят в этот чат" : "Алерты выключены"}
+            </span>
+            <button
+              onClick={disconnect}
+              disabled={busy}
+              className="text-xs text-slate-500 transition-colors hover:text-red-300"
+            >
+              Отвязать
+            </button>
+          </div>
+        </div>
       ) : linking ? (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <p className="text-sm text-slate-300">
-            Ожидаю подтверждения… Нажми <b>Start</b> в открывшемся чате с ботом.
+            Нажми <b className="text-white">Start</b> в открывшемся чате с ботом —
+            привязка подтвердится здесь автоматически.
           </p>
-          <button onClick={() => setLinking(false)} className="btn-ghost text-xs">
-            Отмена
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
+            <span className="text-xs text-slate-500">Ожидаю подтверждения…</span>
+            <button
+              onClick={() => setLinking(false)}
+              className="ml-auto text-xs text-slate-500 hover:text-slate-300"
+            >
+              Отмена
+            </button>
+          </div>
         </div>
       ) : (
-        <button onClick={connect} disabled={busy} className="btn-primary text-sm">
-          {busy ? "Секунду…" : "Подключить Telegram"}
-        </button>
+        <div className="space-y-2.5">
+          <p className="text-sm text-slate-400">
+            Привяжи Telegram — алерты мониторов будут приходить в личный чат с ботом.
+          </p>
+          <button onClick={connect} disabled={busy} className="btn-primary w-full py-1.5 text-sm">
+            {busy ? "Секунду…" : "Подключить Telegram"}
+          </button>
+        </div>
       )}
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
     </div>
+  );
+}
+
+function Switch({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+        checked ? "bg-brand-500" : "bg-slate-700"
+      }`}
+    >
+      <span
+        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-5" : ""
+        }`}
+      />
+    </button>
   );
 }

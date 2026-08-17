@@ -231,18 +231,18 @@ export function AlertsCard({
 }) {
   return (
     <div className="card p-6">
-      <h3 className="text-sm font-semibold text-white">Оповещения</h3>
-      <p className="mt-0.5 text-xs text-slate-500">
-        {connected ? "Telegram подключён" : "Telegram не подключён"}
-      </p>
-      <div className="mt-4 flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 text-brand-300">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M21 5L3 12l6 2 2 6 3-4 4 3 3-14z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-white">Оповещения</h3>
+        <span className="flex items-center gap-1.5 text-xs text-slate-500">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              connected ? "bg-emerald-400" : "bg-slate-600"
+            }`}
+          />
+          Telegram
         </span>
-        <div className="min-w-0 flex-1">{children}</div>
       </div>
+      <div className="mt-4">{children}</div>
     </div>
   );
 }
