@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUserId } from "@/lib/session";
+import { getCurrentUser } from "@/lib/session";
 import { createPayment, yookassaConfigured } from "@/lib/yookassa";
 import { PLANS } from "@/lib/plans";
 
 const schema = z.object({ plan: z.enum(["pro", "business"]) });
 
 export async function POST(req: Request) {
-  const userId = await getSessionUserId();
-  if (userId == null) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   if (!yookassaConfigured()) {
@@ -29,7 +29,8 @@ export async function POST(req: Request) {
       amountRub: PLANS[plan].priceRub,
       description: `Sentela ${PLANS[plan].name} — подписка на месяц`,
       returnUrl: `${base}/dashboard/billing?paid=1`,
-      metadata: { user_id: String(userId), plan, kind: "initial" },
+      metadata: { user_id: String(user.id), plan, kind: "initial" },
+      customerEmail: user.email,
       savePaymentMethod: true,
     });
     if (!payment.confirmationUrl) {

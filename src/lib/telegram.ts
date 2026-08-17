@@ -54,6 +54,68 @@ export async function sendTelegramMessage(
   }
 }
 
+// getMe is stable for the lifetime of a bot token — cache the username in
+// memory so the profile page doesn't hit the Bot API on every render.
+let cachedBotUsername: string | null = null;
+
+export async function getBotUsername(): Promise<string | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  if (cachedBotUsername) return cachedBotUsername;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/bot${token}/getMe`, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { ok: boolean; result?: { username?: string } };
+    cachedBotUsername = data.ok && data.result?.username ? data.result.username : null;
+    return cachedBotUsername;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface TelegramUpdate {
+  update_id: number;
+  message?: {
+    text?: string;
+    chat: { id: number; type: string };
+    from?: { id: number; username?: string; first_name?: string };
+  };
+}
+
+/** Long-poll-free getUpdates: одна короткая выборка накопившихся сообщений. */
+export async function getTelegramUpdates(
+  offset: number | null
+): Promise<{ ok: boolean; updates: TelegramUpdate[]; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, updates: [], error: "TELEGRAM_BOT_TOKEN not configured" };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+  try {
+    const params = new URLSearchParams({ timeout: "0", allowed_updates: '["message"]' });
+    if (offset != null) params.set("offset", String(offset));
+    const res = await fetch(`${API_BASE}/bot${token}/getUpdates?${params}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, updates: [], error: `Telegram API ${res.status}: ${body.slice(0, 200)}` };
+    }
+    const data = (await res.json()) as { ok: boolean; result?: TelegramUpdate[] };
+    return { ok: true, updates: data.result ?? [] };
+  } catch (err) {
+    if (controller.signal.aborted) {
+      return { ok: false, updates: [], error: "Telegram API timeout" };
+    }
+    return { ok: false, updates: [], error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

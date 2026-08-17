@@ -1,0 +1,39 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sentela-mark-title sentela-mark-desc">
+  <title id="sentela-mark-title">Sentela mark</title>
+  <desc id="sentela-mark-desc">A shield-shaped monitoring beacon with a heartbeat status signal.</desc>
+  <defs>
+    <radialGradient id="sentela-mark-bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 392) rotate(90) scale(498)">
+      <stop stop-color="#141F33"/>
+      <stop offset="1" stop-color="#0A0F1A"/>
+    </radialGradient>
+    <linearGradient id="sentela-mark-blue" x1="240" y1="130" x2="795" y2="886" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8ED7FF"/>
+      <stop offset="0.45" stop-color="#33A1FF"/>
+      <stop offset="1" stop-color="#1668E1"/>
+    </linearGradient>
+    <linearGradient id="sentela-mark-pulse" x1="276" y1="548" x2="748" y2="548" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34D399"/>
+      <stop offset="0.52" stop-color="#59BFFF"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="sentela-mark-glow" x="156" y="68" width="712" height="884" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.2 0 0 0 0 0.63 0 0 0 0 1 0 0 0 0.28 0"/>
+      <feBlend in2="BackgroundImageFix" mode="screen" result="glow"/>
+      <feBlend in="SourceGraphic" in2="glow" mode="normal"/>
+    </filter>
+  </defs>
+  <circle cx="512" cy="512" r="512" fill="url(#sentela-mark-bg)"/>
+  <circle cx="512" cy="512" r="450" stroke="#59BFFF" stroke-opacity="0.11" stroke-width="2"/>
+  <g filter="url(#sentela-mark-glow)">
+    <path d="M512 108L790 223V438C790 622 682 790 512 888C342 790 234 622 234 438V223L512 108Z" fill="#0A0F1A" stroke="url(#sentela-mark-blue)" stroke-width="48" stroke-linejoin="round"/>
+    <path d="M392 284C342 336 342 413 392 465" stroke="#59BFFF" stroke-width="34" stroke-linecap="round"/>
+    <path d="M632 284C682 336 682 413 632 465" stroke="#59BFFF" stroke-width="34" stroke-linecap="round"/>
+    <path d="M337 326C300 372 300 430 337 476" stroke="#33A1FF" stroke-opacity="0.68" stroke-width="30" stroke-linecap="round"/>
+    <path d="M687 326C724 372 724 430 687 476" stroke="#33A1FF" stroke-opacity="0.68" stroke-width="30" stroke-linecap="round"/>
+    <circle cx="512" cy="374" r="38" fill="#34D399"/>
+    <path d="M286 560H395L431 468L496 682L564 337L631 638L661 560H738" stroke="url(#sentela-mark-pulse)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="738" cy="560" r="44" fill="#0E1626" stroke="#34D399" stroke-width="34"/>
+  </g>
+</svg>

@@ -11,9 +11,11 @@ import { getActiveTeamId, getTeamOwnerId } from "@/lib/teams";
 import {
   getDashboardOverview,
   getProbeNodes,
-  getTelegramStatus,
   groupTypeCounts,
 } from "@/lib/dashboard";
+import { getTelegramLinkStatus } from "@/lib/telegramLink";
+import { telegramConfigured } from "@/lib/telegram";
+import { TelegramConnect } from "@/components/TelegramConnect";
 import { PLANS } from "@/lib/plans";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
@@ -72,7 +74,7 @@ export default async function DashboardPage({
     getActivePlanId(ownerId),
     listGroupNames(teamId),
     getDashboardOverview(teamId),
-    getTelegramStatus(teamId),
+    getTelegramLinkStatus(user.id),
   ]);
   const plan = PLANS[planId];
   const nodes = getProbeNodes();
@@ -216,7 +218,11 @@ export default async function DashboardPage({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <NodesCard nodes={nodes} />
           <CheckTypesCard segments={donut} total={monitors.length} />
-          <AlertsCard connected={telegram.connected} target={telegram.target} />
+          <AlertsCard connected={telegram.connected}>
+            <TelegramConnect
+              initial={{ ...telegram, botConfigured: telegramConfigured() }}
+            />
+          </AlertsCard>
         </div>
       </div>
 

@@ -31,6 +31,7 @@
 
 import https from "node:https";
 import http from "node:http";
+import http2 from "node:http2";
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -116,7 +117,8 @@ const CONFIG = {
 
   // Limits / safety.
   maxConcurrency: num("MAX_CONCURRENCY", 400), // max simultaneous in-flight visits per target
-  maxSockets: num("MAX_SOCKETS", 256), // keep-alive socket pool per target
+  maxSockets: num("MAX_SOCKETS", 256), // keep-alive socket pool per target (HTTP/1.1)
+  http2: bool("HTTP2", false), // send page/asset/RSC over HTTP/2, like a real browser
   maxAssetsPerVisit: num("MAX_ASSETS_PER_VISIT", 64),
   requestTimeoutMs: num("REQUEST_TIMEOUT_MS", 15000),
   thinkMinMs: num("THINK_MIN_MS", 400),
@@ -286,13 +288,163 @@ function approxHeaderBytes(res) {
   return n;
 }
 
+// ── HTTP/2 transport (opt-in via HTTP2=1) ────────────────────────────────────
+// Browsers reach a CDN over HTTP/2 and multiplex every subresource on ONE
+// connection; sending over HTTP/1.1 is a giveaway that the client isn't a browser.
+// With HTTP2=1, page/asset/RSC requests go over a reused h2 session per origin.
+function getH2Session(runner, origin) {
+  const existing = runner.h2Sessions.get(origin);
+  if (existing && !existing.destroyed && !existing.closed) return existing;
+  const session = http2.connect(origin, { rejectUnauthorized: !CONFIG.insecureTLS });
+  session.on("error", () => {
+    runner.h2Sessions.delete(origin);
+    try {
+      session.destroy();
+    } catch {
+      /* ignore */
+    }
+  });
+  session.on("close", () => runner.h2Sessions.delete(origin));
+  session.setTimeout(CONFIG.requestTimeoutMs * 6, () => {
+    try {
+      session.close();
+    } catch {
+      /* ignore */
+    }
+  });
+  runner.h2Sessions.set(origin, session);
+  return session;
+}
+
+function h2Request(
+  runner,
+  { method = "GET", url, headers = {}, body = null, klass = "page", wantBody = false }
+) {
+  return new Promise((resolve) => {
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      runner.recordError(klass, new Error("badurl"));
+      resolve({ ok: false, err: "badurl" });
+      return;
+    }
+    let session;
+    try {
+      session = getH2Session(runner, u.origin);
+    } catch (e) {
+      runner.recordError(klass, e);
+      resolve({ ok: false, err: classifyError(e) });
+      return;
+    }
+
+    const h2h = {
+      ":method": method,
+      ":scheme": "https",
+      ":authority": u.host,
+      ":path": u.pathname + u.search,
+      "user-agent": runner.ua,
+      accept:
+        klass === "page"
+          ? "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          : "*/*",
+      "accept-language": "ru-RU,ru;q=0.9,en;q=0.8",
+      "accept-encoding": "gzip, deflate, br",
+    };
+    for (const [k, v] of Object.entries(headers)) {
+      const lk = k.toLowerCase();
+      // Connection-specific headers are illegal in HTTP/2; Host maps to :authority.
+      if (["host", "connection", "keep-alive", "transfer-encoding", "upgrade", "proxy-connection"].includes(lk)) {
+        continue;
+      }
+      h2h[lk] = v;
+    }
+    if (body != null) h2h["content-length"] = Buffer.byteLength(body);
+
+    const start = now();
+    let settled = false;
+    let ttfb = null;
+    let bytes = 0;
+    let status = 0;
+    let resHeaders = {};
+    let req;
+    const chunks = wantBody ? [] : null;
+
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      resolve(result);
+    };
+    const deadline = setTimeout(() => {
+      try {
+        req && req.close(http2.constants.NGHTTP2_CANCEL);
+      } catch {
+        /* ignore */
+      }
+      runner.recordError(klass, new Error("deadline"));
+      done({ ok: false, err: "timeout" });
+    }, CONFIG.requestTimeoutMs + 5000);
+
+    try {
+      req = session.request(h2h);
+    } catch (e) {
+      runner.recordError(klass, e);
+      done({ ok: false, err: classifyError(e) });
+      return;
+    }
+    req.setTimeout(CONFIG.requestTimeoutMs, () => {
+      try {
+        req.close(http2.constants.NGHTTP2_CANCEL);
+      } catch {
+        /* ignore */
+      }
+    });
+    req.on("response", (h) => {
+      resHeaders = h;
+      status = Number(h[":status"]) || 0;
+      for (const [k, v] of Object.entries(h)) bytes += k.length + String(v).length + 4;
+    });
+    req.on("data", (chunk) => {
+      if (ttfb === null) ttfb = now() - start;
+      bytes += chunk.length;
+      if (chunks) chunks.push(chunk);
+    });
+    req.on("end", () => {
+      const dur = now() - start;
+      runner.recordBytes(bytes);
+      runner.recordReq(klass, dur, ttfb ?? dur, status, resHeaders);
+      let text = null;
+      if (chunks) {
+        try {
+          text = decodeBody(Buffer.concat(chunks), resHeaders["content-encoding"]);
+        } catch {
+          text = null;
+        }
+      }
+      done({ ok: true, status, bytes, dur, headers: resHeaders, body: text });
+    });
+    req.on("error", (e) => {
+      runner.recordError(klass, e);
+      done({ ok: false, err: classifyError(e) });
+    });
+    if (body != null) req.write(body);
+    req.end();
+  });
+}
+
 /**
  * Perform one HTTP request. Resolves to a result object (never rejects). Counts
  * received bytes into the runner and records latency/status/cache. `wantBody`
  * returns the decoded text body (only used for the HTML page that we parse for
  * assets — assets themselves are streamed and discarded to save memory).
  */
-function httpRequest(runner, { method = "GET", url, headers = {}, body = null, klass = "page", wantBody = false }) {
+function httpRequest(runner, opts) {
+  // HTTP/2 path (browsers use h2 to a CDN). WS + login keep h1 like a real browser.
+  if (CONFIG.http2 && typeof opts.url === "string" && opts.url.startsWith("https")) {
+    return h2Request(runner, opts);
+  }
+  const { method = "GET", url, headers = {}, body = null, klass = "page", wantBody = false } = opts;
   return new Promise((resolve) => {
     let u;
     try {
@@ -465,6 +617,7 @@ class TargetRunner {
     this.base = base.replace(/\/+$/, "");
     this.host = new URL(this.base).host;
     this.ua = pick(USER_AGENTS);
+    this.h2Sessions = new Map(); // origin -> ClientHttp2Session (reused, HTTP2=1)
     this.running = true;
 
     const agentOpts = {

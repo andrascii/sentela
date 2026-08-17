@@ -135,6 +135,7 @@ export default async function MonitorDetailPage({
             failThreshold={monitor.fail_threshold}
             intervalSeconds={monitor.interval_seconds}
             minIntervalSeconds={minIntervalSeconds}
+            alertsEnabled={monitor.alerts_enabled}
           />
         </div>
         <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">

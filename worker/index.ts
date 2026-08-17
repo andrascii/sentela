@@ -12,7 +12,13 @@
  */
 import { ensureMigrated, query } from "../src/lib/db";
 import { runCheck, type CheckResult, type MonitorConfig } from "../src/lib/checks";
-import { sendTelegramMessage, escapeHtml, telegramConfigured } from "../src/lib/telegram";
+import {
+  sendTelegramMessage,
+  getTelegramUpdates,
+  escapeHtml,
+  telegramConfigured,
+} from "../src/lib/telegram";
+import { consumeLinkToken } from "../src/lib/telegramLink";
 import {
   subscriptionsDueForRenewal,
   markRenewAttempt,
@@ -35,6 +41,7 @@ interface MonitorRow {
   fail_threshold: number;
   consecutive_failures: number;
   heartbeat_at: string | null;
+  alerts_enabled: boolean;
 }
 
 const TICK_SECONDS = Math.max(
@@ -225,20 +232,25 @@ async function maybeAlert(
   if (!kind) return;
 
   if (!telegramConfigured()) return;
+  // Per-monitor toggle (галочка «уведомления» в настройках монитора).
+  if (monitor.alerts_enabled === false) return;
 
   // Alert every current team member's Telegram channels (not just the creator's).
-  // Falls back to the creator for legacy monitors with no team.
+  // Falls back to the creator for legacy monitors with no team. Users who turned
+  // off Telegram notifications in their profile (telegram_notify) are skipped.
   const { rows: channels } = monitor.team_id
     ? await query<{ target: string }>(
         `SELECT DISTINCT nc.target
          FROM notification_channels nc
          JOIN team_members tm ON tm.user_id = nc.user_id
-         WHERE tm.team_id = $1 AND nc.type = 'telegram'`,
+         JOIN users u ON u.id = nc.user_id
+         WHERE tm.team_id = $1 AND nc.type = 'telegram' AND u.telegram_notify`,
         [monitor.team_id]
       )
     : await query<{ target: string }>(
-        `SELECT target FROM notification_channels
-         WHERE user_id = $1 AND type = 'telegram'`,
+        `SELECT nc.target FROM notification_channels nc
+         JOIN users u ON u.id = nc.user_id
+         WHERE nc.user_id = $1 AND nc.type = 'telegram' AND u.telegram_notify`,
         [monitor.user_id]
       );
   if (channels.length === 0) return;
@@ -315,6 +327,7 @@ async function billingTick(): Promise<void> {
         description: `Sentela ${PLANS[plan].name} — автопродление`,
         metadata: { user_id: String(s.user_id), plan, kind: "recurring" },
         paymentMethodId: s.payment_method_id,
+        customerEmail: s.email,
       });
       if (p.status === "succeeded" && p.paid) {
         if (await recordPayment(s.user_id, p.id, plan, amount, "succeeded", "recurring")) {
@@ -330,11 +343,81 @@ async function billingTick(): Promise<void> {
   }
 }
 
+// ── Telegram deep-link binding (getUpdates poller) ──────────────────────────
+// Обрабатывает "/start <token>" из бота и привязывает chat_id к аккаунту.
+// getUpdates нельзя дёргать из нескольких процессов (Telegram отвечает 409),
+// поэтому поллер работает только в основном воркере (REGION не задан);
+// региональные пробники занимаются только проверками.
+const TG_OFFSET_KEY = "tg_updates_offset";
+
+async function telegramLinkTick(): Promise<void> {
+  if (!telegramConfigured() || REGION) return;
+  const { rows } = await query<{ value: string }>(
+    "SELECT value FROM worker_state WHERE key = $1",
+    [TG_OFFSET_KEY]
+  );
+  const offset = rows[0] ? parseInt(rows[0].value, 10) || null : null;
+
+  const res = await getTelegramUpdates(offset);
+  if (!res.ok) {
+    // 409 = кто-то ещё поллит (второй основной воркер) — не спамим в лог каждый тик.
+    if (!res.error?.includes("409")) console.error("[worker] getUpdates failed:", res.error);
+    return;
+  }
+  if (res.updates.length === 0) return;
+
+  let maxUpdateId = offset != null ? offset - 1 : 0;
+  for (const upd of res.updates) {
+    maxUpdateId = Math.max(maxUpdateId, upd.update_id);
+    const msg = upd.message;
+    if (!msg?.text || msg.chat.type !== "private") continue;
+    const chatId = String(msg.chat.id);
+    const startMatch = msg.text.match(/^\/start(?:\s+([A-Za-z0-9_-]+))?\s*$/);
+    if (!startMatch) continue;
+    const token = startMatch[1];
+    if (!token) {
+      await sendTelegramMessage(
+        chatId,
+        "Привет! Чтобы получать алерты, привяжи аккаунт: открой профиль на сайте Sentela и нажми «Подключить Telegram»."
+      );
+      continue;
+    }
+    try {
+      const linked = await consumeLinkToken(token, chatId);
+      if (linked) {
+        console.log(`[worker] telegram linked: chat ${chatId} -> ${linked.email}`);
+        await sendTelegramMessage(
+          chatId,
+          `✅ Telegram подключён к аккаунту <b>${escapeHtml(linked.email)}</b>.\nАлерты мониторов будут приходить в этот чат.`
+        );
+      } else {
+        await sendTelegramMessage(
+          chatId,
+          "Ссылка привязки устарела или уже использована. Открой профиль на сайте и нажми «Подключить Telegram» ещё раз."
+        );
+      }
+    } catch (err) {
+      console.error("[worker] telegram link failed:", err);
+    }
+  }
+
+  await query(
+    `INSERT INTO worker_state (key, value, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [TG_OFFSET_KEY, String(maxUpdateId + 1)]
+  );
+}
+
 async function tick(): Promise<void> {
   const due = await getDueMonitors();
   if (due.length > 0) {
     console.log(`[worker] checking ${due.length} monitor(s)`);
     await runWithConcurrency(due, MAX_CONCURRENT, processMonitor);
+  }
+  try {
+    await telegramLinkTick();
+  } catch (err) {
+    console.error("[worker] telegram link tick error:", err);
   }
   tickCount++;
   if (tickCount % CLEANUP_EVERY_TICKS === 0) {

@@ -70,9 +70,17 @@ npm run worker         # in a second terminal — runs the checks
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token into
    `TELEGRAM_BOT_TOKEN`.
-2. Start a chat with your bot (send `/start`).
-3. Find your numeric chat ID (e.g. via [@userinfobot](https://t.me/userinfobot)) and paste it
-   into the "Telegram chat ID" field when adding a monitor.
+2. On the dashboard, click **«Подключить Telegram»** in the *Оповещения* card — it opens a
+   `t.me/<bot>?start=<token>` deep link. Press **Start** in the bot; the worker picks up the
+   `/start <token>` message (via `getUpdates`) and binds your chat automatically — no manual
+   chat-ID entry.
+3. Per-monitor alerts are controlled by the **«Присылать уведомления»** checkbox in monitor
+   settings; the global **«Получать уведомления в Telegram»** toggle lives in the same
+   dashboard card. Alerts fan out to every team member who linked Telegram (and has the
+   global toggle on).
+
+Note for multi-region deployments: only the primary worker (no `REGION` set) polls
+`getUpdates` — Telegram allows a single consumer per bot token.
 
 ## Check types
 

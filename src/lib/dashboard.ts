@@ -49,19 +49,6 @@ export async function getPlanCard(
   return { name: getPlan(planId).name, expiry, free };
 }
 
-export async function getTelegramStatus(
-  teamId: number
-): Promise<{ connected: boolean; target: string | null }> {
-  const { rows } = await query<{ target: string }>(
-    `SELECT nc.target FROM notification_channels nc
-     JOIN team_members tm ON tm.user_id = nc.user_id
-     WHERE tm.team_id = $1 AND nc.type = 'telegram'
-     ORDER BY nc.created_at DESC LIMIT 1`,
-    [teamId]
-  );
-  return { connected: rows.length > 0, target: rows[0]?.target ?? null };
-}
-
 export async function getDashboardOverview(teamId: number): Promise<DashboardOverview> {
   const [countsRes, uptimeRes, hourlyRes, typeRes, incidentsRes, lastRes] = await Promise.all([
     query<{ status: string; n: string }>(

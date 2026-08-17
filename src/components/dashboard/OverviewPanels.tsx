@@ -222,33 +222,27 @@ export function CheckTypesCard({
   );
 }
 
-export function AlertsCard({ connected, target }: { connected: boolean; target: string | null }) {
-  const shown = target ? (target.length > 14 ? target.slice(0, 12) + "…" : target) : null;
+export function AlertsCard({
+  connected,
+  children,
+}: {
+  connected: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="card p-6">
       <h3 className="text-sm font-semibold text-white">Оповещения</h3>
       <p className="mt-0.5 text-xs text-slate-500">
         {connected ? "Telegram подключён" : "Telegram не подключён"}
       </p>
-      <div className="mt-4 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/15 text-brand-300">
+      <div className="mt-4 flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 text-brand-300">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
             <path d="M21 5L3 12l6 2 2 6 3-4 4 3 3-14z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
-        <div className="min-w-0">
-          {connected ? (
-            <p className="truncate text-sm text-slate-200">
-              Канал <span className="font-mono text-brand-300">{shown}</span>
-            </p>
-          ) : (
-            <p className="text-sm text-slate-400">Добавьте chat ID при создании монитора</p>
-          )}
-        </div>
+        <div className="min-w-0 flex-1">{children}</div>
       </div>
-      <Link href="/dashboard/monitors/new" className="btn-secondary mt-4 w-full py-1.5 text-xs">
-        Настроить
-      </Link>
     </div>
   );
 }

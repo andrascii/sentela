@@ -114,7 +114,18 @@ NGINX_UP=0
 echo "→ Проверяю сертификаты для nginx (${SSL_DIR}) …"
 if ssh_run "test -f '$SSL_DIR/fullchain.pem' && test -f '$SSL_DIR/privatekey.pem'"; then
   echo "→ Поднимаю nginx (HTTPS) …"
+  # Drop-in каталог для серверных особенностей конфига и webroot для ACME —
+  # должны существовать до старта (иначе docker создаст их с неожиданными правами).
+  ssh_run "mkdir -p /etc/sentela/nginx.d /var/www/certbot /var/www/html"
   ssh_run "cd '$REMOTE_DIR' && docker compose -p '$NGINX_PROJECT' -f docker-compose.nginx.yml up -d --remove-orphans"
+  # up -d не перечитывает конфиг у уже запущенного контейнера (изменение файла
+  # под бинд-маунтом не пересоздаёт контейнер) — валидируем и перезагружаем явно.
+  if ssh_run "docker exec sentela-nginx nginx -t"; then
+    ssh_run "docker exec sentela-nginx nginx -s reload"
+  else
+    echo "❌ nginx -t не прошёл — конфиг НЕ перезагружен (работает старый). Проверь nginx/sentela.conf и /etc/sentela/nginx.d/*"
+    exit 1
+  fi
   NGINX_UP=1
 else
   echo "⚠️  Сертификаты не найдены в ${SSL_DIR} — nginx пропущен (иначе он бы крэшился)."

@@ -137,6 +137,22 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at DESC);
 
+-- Telegram deep-link binding & notification toggles (idempotent).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_notify BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE monitors ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+  token      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS worker_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Backfill teams for existing data (idempotent).
 DO $$
 BEGIN

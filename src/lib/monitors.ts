@@ -18,6 +18,7 @@ export interface MonitorRow {
   consecutive_failures: number;
   group_name: string | null;
   heartbeat_at: string | null;
+  alerts_enabled: boolean;
   created_at: string;
 }
 
@@ -183,6 +184,7 @@ export interface CreateMonitorInput {
   failThreshold: number;
   config: MonitorConfig;
   groupName?: string | null;
+  alertsEnabled?: boolean;
 }
 
 export async function createMonitor(
@@ -193,8 +195,8 @@ export async function createMonitor(
   const group = input.groupName && input.groupName.trim() ? input.groupName.trim() : null;
   const { rows } = await query<MonitorRow>(
     `INSERT INTO monitors
-       (team_id, user_id, name, url, type, interval_seconds, status, fail_threshold, config, group_name)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8::jsonb, $9)
+       (team_id, user_id, name, url, type, interval_seconds, status, fail_threshold, config, group_name, alerts_enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8::jsonb, $9, $10)
      RETURNING *`,
     [
       teamId,
@@ -206,6 +208,7 @@ export async function createMonitor(
       input.failThreshold,
       JSON.stringify(input.config ?? {}),
       group,
+      input.alertsEnabled ?? true,
     ]
   );
   return rows[0];
@@ -220,6 +223,7 @@ export interface UpdateMonitorFields {
   intervalSeconds?: number;
   /** Acceptable HTTP status codes (http/api). Empty array clears the override. */
   expectedStatus?: number[];
+  alertsEnabled?: boolean;
 }
 
 /** Update editable monitor fields. Returns true if a row changed. */
@@ -242,6 +246,7 @@ export async function updateMonitorMeta(
     sets.push(`group_name = ${add(group)}`);
   }
   if (fields.failThreshold !== undefined) sets.push(`fail_threshold = ${add(fields.failThreshold)}`);
+  if (fields.alertsEnabled !== undefined) sets.push(`alerts_enabled = ${add(fields.alertsEnabled)}`);
   if (fields.intervalSeconds !== undefined) {
     sets.push(`interval_seconds = ${add(fields.intervalSeconds)}`);
   }

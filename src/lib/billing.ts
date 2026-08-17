@@ -102,23 +102,31 @@ export async function listPayments(userId: number): Promise<PaymentRow[]> {
 
 /** Subscriptions whose paid period ends soon and that should auto-renew. */
 export async function subscriptionsDueForRenewal(): Promise<
-  { user_id: number; plan: string; price_rub: number | null; payment_method_id: string }[]
+  {
+    user_id: number;
+    plan: string;
+    price_rub: number | null;
+    payment_method_id: string;
+    email: string;
+  }[]
 > {
   const { rows } = await query<{
     user_id: number;
     plan: string;
     price_rub: number | null;
     payment_method_id: string;
+    email: string;
   }>(
-    `SELECT user_id, plan, price_rub, payment_method_id
-     FROM subscriptions
-     WHERE auto_renew = true
-       AND payment_method_id IS NOT NULL
-       AND plan <> 'starter'
-       AND status = 'active'
-       AND expires_at IS NOT NULL
-       AND expires_at <= now() + interval '1 day'
-       AND (renew_last_attempt IS NULL OR renew_last_attempt < now() - interval '6 hours')
+    `SELECT s.user_id, s.plan, s.price_rub, s.payment_method_id, u.email
+     FROM subscriptions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.auto_renew = true
+       AND s.payment_method_id IS NOT NULL
+       AND s.plan <> 'starter'
+       AND s.status = 'active'
+       AND s.expires_at IS NOT NULL
+       AND s.expires_at <= now() + interval '1 day'
+       AND (s.renew_last_attempt IS NULL OR s.renew_last_attempt < now() - interval '6 hours')
      LIMIT 50`
   );
   return rows;

@@ -25,6 +25,7 @@ export function MonitorSettingsEditor({
   failThreshold: initialThreshold,
   intervalSeconds: initialInterval,
   minIntervalSeconds,
+  alertsEnabled: initialAlerts,
 }: {
   id: number;
   type: string;
@@ -34,6 +35,7 @@ export function MonitorSettingsEditor({
   failThreshold: number;
   intervalSeconds: number;
   minIntervalSeconds: number;
+  alertsEnabled: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -42,6 +44,7 @@ export function MonitorSettingsEditor({
   const [expectedText, setExpectedText] = useState(expectedStatus.join(", "));
   const [failThreshold, setFailThreshold] = useState(initialThreshold);
   const [intervalSeconds, setIntervalSeconds] = useState(initialInterval);
+  const [alertsEnabled, setAlertsEnabled] = useState(initialAlerts);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +59,7 @@ export function MonitorSettingsEditor({
       name,
       failThreshold,
       intervalSeconds,
+      alertsEnabled,
     };
     if (urlEditable) body.url = url;
     if (isHttpLike) body.expectedStatus = parseExpectedStatus(expectedText);
@@ -175,6 +179,16 @@ export function MonitorSettingsEditor({
           </select>
         </div>
       </div>
+
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-brand-500"
+          checked={alertsEnabled}
+          onChange={(e) => setAlertsEnabled(e.target.checked)}
+        />
+        Присылать уведомления по этому монитору
+      </label>
 
       {error && <p className="text-sm text-red-300">{error}</p>}
 

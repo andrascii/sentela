@@ -3,11 +3,13 @@
 -- and idempotently by the app/worker at startup (see src/lib/db.ts).
 
 CREATE TABLE IF NOT EXISTS users (
-  id            SERIAL PRIMARY KEY,
-  email         TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  status_slug   TEXT UNIQUE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  id              SERIAL PRIMARY KEY,
+  email           TEXT UNIQUE NOT NULL,
+  password_hash   TEXT NOT NULL,
+  status_slug     TEXT UNIQUE,
+  -- Глобальный тумблер «получать алерты в Telegram» (профиль).
+  telegram_notify BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -83,6 +85,8 @@ CREATE TABLE IF NOT EXISTS monitors (
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   group_name           TEXT,
   heartbeat_at         TIMESTAMPTZ,
+  -- Слать ли алерты по этому монитору (галочка в настройках монитора).
+  alerts_enabled       BOOLEAN NOT NULL DEFAULT true,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_monitors_user ON monitors(user_id);
@@ -122,3 +126,19 @@ CREATE TABLE IF NOT EXISTS incident_comments (
 );
 CREATE INDEX IF NOT EXISTS idx_incident_comments_team
   ON incident_comments(team_id, created_at DESC);
+
+-- Одноразовые токены привязки Telegram: пользователь жмёт «Подключить» →
+-- получает ссылку t.me/<bot>?start=<token> → бот (воркер, getUpdates) меняет
+-- токен на chat_id и создаёт notification_channel. TTL проверяется при выдаче.
+CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+  token      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Разделяемое состояние воркера (offset getUpdates и т.п.).
+CREATE TABLE IF NOT EXISTS worker_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

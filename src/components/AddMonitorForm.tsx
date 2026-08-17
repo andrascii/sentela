@@ -172,7 +172,7 @@ export function AddMonitorForm({
   const [groupName, setGroupName] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState(Math.max(300, minIntervalSeconds));
   const [failThreshold, setFailThreshold] = useState(2);
-  const [telegramChatId, setTelegramChatId] = useState("");
+  const [alertsEnabled, setAlertsEnabled] = useState(true);
 
   // http / api
   const [expectedStatusText, setExpectedStatusText] = useState("");
@@ -293,7 +293,7 @@ export function AddMonitorForm({
           intervalSeconds,
           failThreshold,
           groupName,
-          telegramChatId,
+          alertsEnabled,
           config: buildConfig(),
         }),
       });
@@ -617,11 +617,16 @@ export function AddMonitorForm({
       </div>
 
       <div>
-        <label className="label" htmlFor="telegram">
-          Telegram chat ID <span className="text-slate-500">(необязательно)</span>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+          <input type="checkbox" className="h-4 w-4 accent-brand-500" checked={alertsEnabled}
+            onChange={(e) => setAlertsEnabled(e.target.checked)} />
+          Присылать уведомления по этому монитору
         </label>
-        <input id="telegram" className="input font-mono" maxLength={64} value={telegramChatId}
-          onChange={(e) => setTelegramChatId(e.target.value)} placeholder="123456789" />
+        <p className="mt-1.5 text-xs text-slate-500">
+          Уведомления приходят в Telegram, подключённый на{" "}
+          <Link href="/dashboard" className="text-brand-300 hover:underline">дашборде</Link>{" "}
+          (карточка «Оповещения»).
+        </p>
       </div>
 
       {error && (

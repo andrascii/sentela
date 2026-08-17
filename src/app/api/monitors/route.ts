@@ -53,6 +53,9 @@ const schema = z.object({
   intervalSeconds: z.coerce.number().int(),
   failThreshold: z.coerce.number().int().min(1).max(5).optional(),
   groupName: z.string().trim().max(80).optional(),
+  alertsEnabled: z.boolean().optional(),
+  // Legacy: ручной ввод chat ID из старых клиентов; новая привязка — deep-link
+  // бота через /api/telegram. Принимаем для обратной совместимости.
   telegramChatId: z.string().trim().max(64).optional().or(z.literal("")),
   config: configSchema,
 });
@@ -200,6 +203,7 @@ export async function POST(req: Request) {
     failThreshold,
     config: cleanConfig,
     groupName,
+    alertsEnabled: parsed.data.alertsEnabled,
   });
 
   if (telegramChatId && telegramChatId.length > 0) {

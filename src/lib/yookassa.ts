@@ -30,6 +30,7 @@ interface CreatePaymentInput {
   returnUrl?: string; // for the redirect (first, on-session) payment
   savePaymentMethod?: boolean; // ask to remember the card for recurring
   paymentMethodId?: string; // recurring off-session charge
+  customerEmail?: string; // for the fiscal receipt (54-ФЗ) — YooKassa emails it here
 }
 
 function normalize(p: {
@@ -57,6 +58,24 @@ export async function createPayment(input: CreatePaymentInput): Promise<YkPaymen
     description: input.description.slice(0, 128),
     metadata: input.metadata,
   };
+  // Fiscalization (54-ФЗ): a shop with receipts enabled rejects payments without a
+  // `receipt`. Attach the customer email (YooKassa sends the fiscal receipt there)
+  // and a single service line item. vat_code 1 = "без НДС" (typical for ИП on УСН).
+  if (input.customerEmail) {
+    body.receipt = {
+      customer: { email: input.customerEmail },
+      items: [
+        {
+          description: input.description.slice(0, 128),
+          quantity: "1.00",
+          amount: { value: input.amountRub.toFixed(2), currency: "RUB" },
+          vat_code: Number(process.env.YOOKASSA_VAT_CODE) || 1,
+          payment_mode: "full_payment",
+          payment_subject: "service",
+        },
+      ],
+    };
+  }
   if (input.paymentMethodId) {
     // Recurring (off-session): charge the saved method, no user redirect.
     body.payment_method_id = input.paymentMethodId;

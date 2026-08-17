@@ -19,6 +19,7 @@ const patchSchema = z.object({
   failThreshold: z.coerce.number().int().min(1).max(5).optional(),
   intervalSeconds: z.coerce.number().int().optional(),
   expectedStatus: z.array(z.number().int().min(100).max(599)).max(20).optional(),
+  alertsEnabled: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
