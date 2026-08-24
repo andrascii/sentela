@@ -280,6 +280,23 @@ export async function listGroupNames(teamId: number): Promise<string[]> {
   return rows.map((r) => r.group_name);
 }
 
+/**
+ * Переименовывает группу мониторов команды (group_name — просто текстовая метка
+ * на мониторах, поэтому это массовый UPDATE). Если группа с новым именем уже
+ * существует — группы сливаются. Возвращает число затронутых мониторов.
+ */
+export async function renameGroup(
+  teamId: number,
+  from: string,
+  to: string
+): Promise<number> {
+  const { rowCount } = await query(
+    "UPDATE monitors SET group_name = $3 WHERE team_id = $1 AND group_name = $2",
+    [teamId, from, to]
+  );
+  return rowCount ?? 0;
+}
+
 export async function deleteMonitor(id: number, teamId: number): Promise<boolean> {
   const { rowCount } = await query(
     "DELETE FROM monitors WHERE id = $1 AND team_id = $2",

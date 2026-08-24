@@ -21,6 +21,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { RealtimeRefresh } from "@/components/RealtimeRefresh";
 import { LiveCheckFeed } from "@/components/realtime/LiveCheckFeed";
 import { MonitorGroupEditor } from "@/components/MonitorGroupEditor";
+import { GroupRenameEditor } from "@/components/GroupRenameEditor";
 import { MonitorRowMenu } from "@/components/dashboard/MonitorRowMenu";
 import {
   AlertsCard,
@@ -146,8 +147,13 @@ export default async function DashboardPage({
                 <section key={key || "ungrouped"}>
                   {showGroupHeaders && (
                     <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {key === UNGROUPED ? "Без группы" : key}{" "}
-                      <span className="text-slate-600">· {items.length}</span>
+                      {key === UNGROUPED ? (
+                        <>
+                          Без группы <span className="text-slate-600">· {items.length}</span>
+                        </>
+                      ) : (
+                        <GroupRenameEditor name={key} count={items.length} />
+                      )}
                     </p>
                   )}
                   <div className="card overflow-hidden">
